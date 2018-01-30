@@ -7,6 +7,7 @@ import (
 	"math"
 	"sync"
 	"time"
+	"fmt"
 )
 
 type baseErr struct {
@@ -45,7 +46,7 @@ type ObjectPool struct {
 	closeLock                        sync.Mutex
 	evictionLock                     sync.Mutex
 	idleObjects                      *collections.LinkedBlockingDeque
-	allObjects                       *collections.SyncIdentityMap
+	allObjects                       sync.Map//*collections.SyncIdentityMap
 	factory                          PooledObjectFactory
 	createCount                      concurrent.AtomicInteger
 	destroyedByEvictorCount          concurrent.AtomicInteger
@@ -71,7 +72,7 @@ func NewObjectPoolWithDefaultConfig(factory PooledObjectFactory) *ObjectPool {
 func NewObjectPoolWithAbandonedConfig(factory PooledObjectFactory, config *ObjectPoolConfig, abandonedConfig *AbandonedConfig) *ObjectPool {
 	pool := ObjectPool{factory: factory, Config: config,
 		idleObjects:             collections.NewDeque(math.MaxInt32),
-		allObjects:              collections.NewSyncMap(),
+		//allObjects:              collections.NewSyncMap(),
 		createCount:             concurrent.AtomicInteger(0),
 		destroyedByEvictorCount: concurrent.AtomicInteger(0),
 		destroyedCount:          concurrent.AtomicInteger(0),
@@ -131,7 +132,7 @@ func (pool *ObjectPool) GetNumIdle() int {
 
 // GetNumActive return the number of instances currently borrowed from pool.
 func (pool *ObjectPool) GetNumActive() int {
-	return pool.allObjects.Size() - pool.idleObjects.Size()
+	return pool.TotalSize() - pool.idleObjects.Size()
 }
 
 // GetDestroyedCount return destroyed object count of this pool
@@ -149,7 +150,7 @@ func (pool *ObjectPool) removeAbandoned(config *AbandonedConfig) {
 	now := currentTimeMillis()
 	timeout := now - int64((config.RemoveAbandonedTimeout * 1000))
 	var remove []*PooledObject
-	objects := pool.allObjects.Values()
+	objects := pool.TotalValues()
 	for _, o := range objects {
 		pooledObject := o.(*PooledObject)
 		pooledObject.lock.Lock()
@@ -189,7 +190,7 @@ func (pool *ObjectPool) create() (*PooledObject, error) {
 	//	if (ac != null && ac.getLogAbandoned()) {
 	//		p.setLogAbandoned(true);
 	//	}
-	pool.allObjects.Put(p.Object, p)
+	pool.allObjects.Store(p.Object, p)
 	return p, nil
 }
 
@@ -205,7 +206,7 @@ func (pool *ObjectPool) doDestroy(toDestroy *PooledObject, inLock bool) {
 		toDestroy.Invalidate()
 	}
 	pool.idleObjects.RemoveFirstOccurrence(toDestroy)
-	pool.allObjects.Remove(toDestroy.Object)
+	pool.allObjects.Delete(toDestroy.Object)
 	pool.factory.DestroyObject(toDestroy)
 	pool.destroyedCount.IncrementAndGet()
 	pool.createCount.DecrementAndGet()
@@ -365,10 +366,12 @@ func (pool *ObjectPool) IsClosed() bool {
 // ReturnObject return an instance to the pool. By contract, object
 // must have been obtained using BorrowObject()
 func (pool *ObjectPool) ReturnObject(object interface{}) error {
+	fmt.Println(object)
 	if object == nil {
 		return errors.New("object is nil")
 	}
-	p, ok := pool.allObjects.Get(object).(*PooledObject)
+	fetch, ok := pool.allObjects.Load(object)
+	p, ok := fetch.(*PooledObject)
 
 	if !ok {
 		if !pool.isAbandonedConfig() {
@@ -453,7 +456,8 @@ func (pool *ObjectPool) Clear() {
 // This method should be used when an object that has been borrowed is
 // determined (due to an exception or other problem) to be invalid.
 func (pool *ObjectPool) InvalidateObject(object interface{}) error {
-	p, ok := pool.allObjects.Get(object).(*PooledObject)
+	fetch, _ := pool.allObjects.Load(object)
+	p, ok := fetch.(*PooledObject)
 	if !ok {
 		if pool.isAbandonedConfig() {
 			return nil
@@ -669,4 +673,27 @@ func Prefill(pool *ObjectPool, count int) {
 	for i := 0; i < count; i++ {
 		pool.AddObject()
 	}
+}
+
+//自己加的
+func (pool *ObjectPool)TotalSize() int{
+	var count = 0;
+	pool.allObjects.Range(func(key, value interface{})bool{
+		count++;
+		return true
+	})
+	return count;
+}
+
+func (pool *ObjectPool)TotalValues() []interface{}{
+	var count []interface{};
+	pool.allObjects.Range(func(key, value interface{})bool{
+		count = append(count, value);
+		return true
+	})
+	return count;
+}
+
+func (pool *ObjectPool)GetIdleSize() int {
+	return pool.idleObjects.Size()
 }
