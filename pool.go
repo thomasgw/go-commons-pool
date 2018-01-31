@@ -675,7 +675,6 @@ func Prefill(pool *ObjectPool, count int) {
 	}
 }
 
-//自己加的
 func (pool *ObjectPool)TotalSize() int{
 	var count = 0;
 	pool.allObjects.Range(func(key, value interface{})bool{

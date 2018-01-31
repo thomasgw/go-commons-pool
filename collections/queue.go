@@ -70,15 +70,35 @@ type LinkedBlockingDeque struct {
 
 	//Condition for waiting puts
 	notFull *concurrent.TimeoutCond
+
+	//get object from deque
+	rlock *sync.RWMutex
+
+	//put object back to deque
+	wlock *sync.RWMutex
+
+	//counter lock
+	clock *sync.RWMutex
 }
 
-// NewDeque return a LinkedBlockingDeque with init capacity
+// NewDeque return a LinkedBlockingDeque with init capacity(***modified***)
 func NewDeque(capacity int) *LinkedBlockingDeque {
 	if capacity < 0 {
 		panic(errors.New("capacity must > 0"))
 	}
 	lock := new(sync.Mutex)
-	return &LinkedBlockingDeque{capacity: capacity, lock: lock, notEmpty: concurrent.NewTimeoutCond(lock), notFull: concurrent.NewTimeoutCond(lock)}
+	readlock := new(sync.RWMutex)
+	writelock := new(sync.RWMutex)
+	counterlock := new(sync.RWMutex)
+	return &LinkedBlockingDeque{
+		capacity: capacity,
+		lock: lock,
+		notEmpty: concurrent.NewTimeoutCond(lock),
+		notFull: concurrent.NewTimeoutCond(lock),
+		rlock: readlock,
+		wlock: writelock,
+		clock: counterlock,
+	}
 }
 
 //Links provided element as first element, or returns false if full.
@@ -115,7 +135,9 @@ func (q *LinkedBlockingDeque) linkLast(e interface{}) bool {
 	} else {
 		l.next = x
 	}
+	q.clock.Lock()
 	q.count = q.count + 1
+	q.clock.Unlock()
 	q.notEmpty.Signal()
 	return true
 }
@@ -137,12 +159,14 @@ func (q *LinkedBlockingDeque) unlinkFirst() interface{} {
 	} else {
 		n.prev = nil
 	}
+	q.clock.Lock()
 	q.count = q.count - 1
+	q.clock.Unlock()
 	q.notFull.Signal()
 	return item
 }
 
-//Removes and returns the last element, or nil if empty.
+//Removes and returns the last element, or nil if empty.(***modified***)
 func (q *LinkedBlockingDeque) unlinkLast() interface{} {
 	l := q.last
 	if l == nil {
@@ -163,7 +187,7 @@ func (q *LinkedBlockingDeque) unlinkLast() interface{} {
 	return item
 }
 
-//Unlink the provided node.
+//Unlink the provided node.(***modified***)
 func (q *LinkedBlockingDeque) unlink(x *Node) {
 	// assert lock.isHeldByCurrentThread();
 	p := x.prev
@@ -222,14 +246,14 @@ func (q *LinkedBlockingDeque) OfferFirst(e interface{}) bool {
 }
 
 // OfferLast inserts the specified element at the end of this deque unless it would violate capacity restrictions.
-// return if the element was added to this deque
+// return if the element was added to this deque(***modified***)
 func (q *LinkedBlockingDeque) OfferLast(e interface{}) bool {
 	if e == nil {
 		return false
 	}
-	q.lock.Lock()
+	q.wlock.Lock()
 	result := q.linkLast(e)
-	q.lock.Unlock()
+	q.wlock.Unlock()
 	return result
 }
 
@@ -247,33 +271,33 @@ func (q *LinkedBlockingDeque) PutFirst(e interface{}) {
 }
 
 // PutLast Link the provided element as the last in the queue, waiting until there
-// is space to do so if the queue is full.
+// is space to do so if the queue is full.(***modified***)
 func (q *LinkedBlockingDeque) PutLast(e interface{}) {
 	if e == nil {
 		return
 	}
-	q.lock.Lock()
-	defer q.lock.Unlock()
+	q.wlock.Lock()
+	defer q.wlock.Unlock()
 	for !q.linkLast(e) {
 		q.notFull.Wait()
 	}
 }
 
 // PollFirst retrieves and removes the first element of this deque,
-// or returns nil if this deque is empty.
+// or returns nil if this deque is empty.(***modified***)
 func (q *LinkedBlockingDeque) PollFirst() (e interface{}) {
-	q.lock.Lock()
+	q.rlock.Lock()
 	result := q.unlinkFirst()
-	q.lock.Unlock()
+	q.rlock.Unlock()
 	return result
 }
 
 // PollFirstWithTimeout retrieves and removes the first element of this deque, waiting
 // up to the specified wait time if necessary for an element to become available.
-// return NewInterruptedErr when waiting bean interrupted
+// return NewInterruptedErr when waiting bean interrupted(***modified***)
 func (q *LinkedBlockingDeque) PollFirstWithTimeout(timeout time.Duration) (interface{}, error) {
-	q.lock.Lock()
-	defer q.lock.Unlock()
+	q.rlock.Lock()
+	defer q.rlock.Unlock()
 	var x interface{}
 	interrupt := false
 	for x = q.unlinkFirst(); x == nil; x = q.unlinkFirst() {
@@ -319,10 +343,10 @@ func (q *LinkedBlockingDeque) PollLastWithTimeout(timeout time.Duration) (interf
 
 // TakeFirst unlink the first element in the queue, waiting until there is an element
 // to unlink if the queue is empty.
-// return NewInterruptedErr if wait condition is interrupted
+// return NewInterruptedErr if wait condition is interrupted(***modified***)
 func (q *LinkedBlockingDeque) TakeFirst() (interface{}, error) {
-	q.lock.Lock()
-	defer q.lock.Unlock()
+	q.rlock.Lock()
+	defer q.rlock.Unlock()
 	var x interface{}
 	interrupt := false
 	for x = q.unlinkFirst(); x == nil; x = q.unlinkFirst() {
@@ -352,16 +376,16 @@ func (q *LinkedBlockingDeque) TakeLast() (interface{}, error) {
 }
 
 // PeekFirst retrieves, but does not remove, the first element of this deque,
-// or returns nil if this deque is empty.
+// or returns nil if this deque is empty.(***modified***)
 func (q *LinkedBlockingDeque) PeekFirst() interface{} {
 	var result interface{}
-	q.lock.Lock()
+	q.rlock.RLock()
 	if q.first == nil {
 		result = nil
 	} else {
 		result = q.first.item
 	}
-	q.lock.Unlock()
+	q.rlock.RUnlock()
 	return result
 }
 
@@ -369,7 +393,7 @@ func (q *LinkedBlockingDeque) PeekFirst() interface{} {
 // or returns nil if this deque is empty.
 func (q *LinkedBlockingDeque) PeekLast() interface{} {
 	var result interface{}
-	q.lock.Lock()
+	q.wlock.RLock()
 	if q.last == nil {
 		result = nil
 	} else {
@@ -450,8 +474,8 @@ func (q *LinkedBlockingDeque) ToSlice() []interface{} {
 
 // Size return this LinkedBlockingDeque current elements len, is concurrent safe
 func (q *LinkedBlockingDeque) Size() int {
-	q.lock.Lock()
-	defer q.lock.Unlock()
+	q.clock.RLock()
+	defer q.clock.RUnlock()
 	return q.size()
 }
 
