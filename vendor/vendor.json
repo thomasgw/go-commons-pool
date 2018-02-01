@@ -1,0 +1,25 @@
+{
+	"comment": "",
+	"ignore": "",
+	"package": [
+		{
+			"checksumSHA1": "SK/XFIFGPjm2HhV/8IY0q96DWuM=",
+			"path": "github.com/jolestar/go-commons-pool",
+			"revision": "2bda2d8f3bdf571db901f02378e92edd916380fa",
+			"revisionTime": "2017-08-09T06:54:32Z"
+		},
+		{
+			"checksumSHA1": "lFdM24QWp0jYLFm4YxFeAgBt3uE=",
+			"path": "github.com/jolestar/go-commons-pool/collections",
+			"revision": "2bda2d8f3bdf571db901f02378e92edd916380fa",
+			"revisionTime": "2017-08-09T06:54:32Z"
+		},
+		{
+			"checksumSHA1": "ueg2fdJtSRhvNZ9mEqJ84RPvV+4=",
+			"path": "github.com/jolestar/go-commons-pool/concurrent",
+			"revision": "2bda2d8f3bdf571db901f02378e92edd916380fa",
+			"revisionTime": "2017-08-09T06:54:32Z"
+		}
+	],
+	"rootPath": "github.com/thomasgw/go-commons-pool"
+}
